@@ -1,0 +1,6 @@
+/python-virtual-environments
+/dist
+/.vscode
+/__pycache__
+/build
+*xml
