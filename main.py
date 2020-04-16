@@ -9,12 +9,16 @@ from zeep import Client
 from datetime import datetime
 from dateutil.parser import parse
 import re
+
 import openpyxl
 from openpyxl.styles import Alignment, Border, Side
 
 today = datetime.today()
 syear, fyear = today.year-1, today.year-1
-smonth, fmonth = 2, 2
+smonth, fmonth = 1, 1
+
+temp_syear, temp_fyear = today.year-1, today.year-1
+temp_smonth, temp_fmonth = 2, 2
 
 
 def get_banks_data_and_name(regnums, table_conf, dates):
@@ -23,7 +27,8 @@ def get_banks_data_and_name(regnums, table_conf, dates):
     for date in dates:
         temp = date.split('-')
         year = int(temp[0])
-        month = int(temp[1].replace('0', ''))
+        month = int(temp[1])
+
         if month > 1:
             f_date_month = f'{month - 1:2}'.replace(' ', '0')
             f_date_year = year
@@ -32,10 +37,19 @@ def get_banks_data_and_name(regnums, table_conf, dates):
             f_date_year = year - 1
         f_dates.append(f'{f_date_month}.{f_date_year}')
     row_columns = {table[1]: {} for table in table_conf}
+    row_columns_divide = {table[1]: {} for table in table_conf}
     row_names = []
+
     for table in table_conf:
-        row_columns[table[1]][table[2]] = table[0]
-        row_names.append(table[0])
+        if len(table) == 3:
+            row_columns[table[1]][table[2]] = table[0]
+            row_names.append(table[0])
+        else:
+            row_names.append(table[0])
+            row_columns_divide[table[1]][table[2]] = table[0]
+            row_columns_divide[table[3]][table[4]] = table[0]
+    row_columns_divide = {key: value for key, value in row_columns_divide.items() if value}
+    row_columns = {key: value for key, value in row_columns.items() if value}
 
     banks_data = {regnum: {f_date: {} for f_date in f_dates} for regnum in regnums}
     banks_name = {regnum: True for regnum in regnums}
@@ -57,6 +71,18 @@ def get_banks_data_and_name(regnums, table_conf, dates):
                         for col in column_names:
                             name_row = row_columns[numsc][col]
                             banks_data[regnum][f_date][name_row] = element.find(col).text
+                    if numsc in row_columns_divide.keys():
+                        column_names = row_columns_divide[numsc].keys()
+                        for col in column_names:
+                            name_row = row_columns_divide[numsc][col]
+                            if name_row in banks_data[regnum][f_date].keys():
+                                temp_data = float(banks_data[regnum][f_date][name_row])
+                                try:
+                                    banks_data[regnum][f_date][name_row] = round(temp_data / float(element.find(col).text) * 100, 2)
+                                except (TypeError, ZeroDivisionError):
+                                    pass
+                            else:
+                                banks_data[regnum][f_date][name_row] = element.find(col).text
                 if element.tag == 'F1011':
                     banks_name[regnum] = element.find('cname').text
         if empty:
@@ -70,29 +96,32 @@ def get_banks_data_and_name(regnums, table_conf, dates):
         for f_date in f_dates:
             for row_name in row_names:
                 if row_name in banks_data[regnum][f_date].keys():
-                    value = banks_data[regnum][f_date][row_name][:-5]
-                    sorted_bank_data[regnum][f_date][row_name] = '{0:,}'.format(int(value)).replace(',', ' ')
+                    value = banks_data[regnum][f_date][row_name]
+                    if isinstance(value, str):
+                        value = value[:-5]
+                        sorted_bank_data[regnum][f_date][row_name] = '{0:,}'.format(int(value)).replace(',', ' ')
+                    elif isinstance(value, float):
+                        sorted_bank_data[regnum][f_date][row_name] = f'{value}%'
                 else:
                     sorted_bank_data[regnum][f_date][row_name] = 'Нет данных'
     return sorted_bank_data, banks_name
 
 
-def save_excel_data(banks_data, banks_name):
+def save_excel_data(banks_data, banks_name, path):
     thin_border = Border(
         left=Side(style='thin'),
         right=Side(style='thin'),
         top=Side(style='thin'),
         bottom=Side(style='thin')
     )
-
     for regnum, data in banks_data.items():
         name = banks_name[regnum]
         if name is True:
             continue
-        df = pd.DataFrame.from_dict(data)
+        df = pd.DataFrame.from_dict(data).reindex([setting[0] for setting in settings])
         name = name.replace('"', '')
-        df.to_excel(f'{name}.xlsx')
-        wb = openpyxl.load_workbook(f'{name}.xlsx')
+        df.to_excel(path / f'{name}.xlsx')
+        wb = openpyxl.load_workbook(path / f'{name}.xlsx')
         worksheet = wb.active
         for col in worksheet.columns:
             max_length = 0
@@ -115,78 +144,90 @@ def save_excel_data(banks_data, banks_name):
         worksheet.move_range(f'A1:{[r for r in worksheet.rows][-1][-1].coordinate}', rows=1)
         last_row_number = [r for r in worksheet.rows][-1][-1].row
         worksheet.move_range(f'A{last_row_number}:B{last_row_number}', rows=-(last_row_number-1))
-        wb.save(f'{name}.xlsx')
+        wb.save(path / f'{name}.xlsx')
 
 
 def to_num(settings):
     setting_num = []
     for setting in settings:
-        num = None
-        if setting[2] == 'numsc':
-            num = 1
-        elif setting[2] == 'vr':
-            num = 2
-        elif setting[2] == 'vv':
-            num = 3
-        elif setting[2] == 'vitg':
-            num = 4
-        elif setting[2] == 'ora':
-            num = 5
-        elif setting[2] == 'ova':
-            num = 6
-        elif setting[2] == 'oitga':
-            num = 7
-        elif setting[2] == 'orp':
-            num = 8
-        elif setting[2] == 'ovp':
-            num = 9
-        elif setting[2] == 'oitgp':
-            num = 10
-        elif setting[2] == 'ir':
-            num = 11
-        elif setting[2] == 'iv':
-            num = 12
-        elif setting[2] == 'iitg':
-            num = 13
-        else:
-            continue
-        setting_num.append([setting[0], setting[1], num])
+        size = len(setting)
+        num = []
+        number_cells = [2] if size == 3 else [2, 4]
+        for cell in number_cells:
+            if setting[cell] == 'numsc':
+                num.append(1)
+            elif setting[cell] == 'vr':
+                num.append(2)
+            elif setting[cell] == 'vv':
+                num.append(3)
+            elif setting[cell] == 'vitg':
+                num.append(4)
+            elif setting[cell] == 'ora':
+                num.append(5)
+            elif setting[cell] == 'ova':
+                num.append(6)
+            elif setting[cell] == 'oitga':
+                num.append(7)
+            elif setting[cell] == 'orp':
+                num.append(8)
+            elif setting[cell] == 'ovp':
+                num.append(9)
+            elif setting[cell] == 'oitgp':
+                num.append(10)
+            elif setting[cell] == 'ir':
+                num.append(11)
+            elif setting[cell] == 'iv':
+                num.append(12)
+            elif setting[cell] == 'iitg':
+                num.append(13)
+            else:
+                continue
+        if size == 3:
+            setting_num.append([setting[0], setting[1], num[0]])
+        if size == 5:
+            setting_num.append([setting[0], setting[1], num[0], setting[3], num[1]])
     return setting_num
 
 
 def to_str(settings):
     setting_num = []
     for setting in settings:
-        st = None
-        if setting[2] == 1:
-            st = 'numsc'
-        elif setting[2] == 2:
-            st = 'vr'
-        elif setting[2] == 3:
-            st = 'vv'
-        elif setting[2] == 4:
-            st = 'vitg'
-        elif setting[2] == 5:
-            st = 'ora'
-        elif setting[2] == 6:
-            st = 'ova'
-        elif setting[2] == 7:
-            st = 'oitga'
-        elif setting[2] == 8:
-            st = 'orp'
-        elif setting[2] == 9:
-            st = 'ovp'
-        elif setting[2] == 10:
-            st = 'oitgp'
-        elif setting[2] == 11:
-            st = 'ir'
-        elif setting[2] == 12:
-            st = 'iv'
-        elif setting[2] == 13:
-            st = 'iitg'
-        else:
-            continue
-        setting_num.append([setting[0], setting[1], st])
+        size = len(setting)
+        st = []
+        number_cells = [2] if size == 3 else [2, 4]
+        for cell in number_cells:
+            if setting[cell] == 1:
+                st.append('numsc')
+            elif setting[cell] == 2:
+                st.append('vr')
+            elif setting[cell] == 3:
+                st.append('vv')
+            elif setting[cell] == 4:
+                st.append('vitg')
+            elif setting[cell] == 5:
+                st.append('ora')
+            elif setting[cell] == 6:
+                st.append('ova')
+            elif setting[cell] == 7:
+                st.append('oitga')
+            elif setting[cell] == 8:
+                st.append('orp')
+            elif setting[cell] == 9:
+                st.append('ovp')
+            elif setting[cell] == 10:
+                st.append('oitgp')
+            elif setting[cell] == 11:
+                st.append('ir')
+            elif setting[cell] == 12:
+                st.append('iv')
+            elif setting[cell] == 13:
+                st.append('iitg')
+            else:
+                continue
+        if size == 3:
+            setting_num.append([setting[0], setting[1], st[0]])
+        if size == 5:
+            setting_num.append([setting[0], setting[1], st[0], setting[3], st[1]])
     return setting_num
 
 
@@ -198,6 +239,8 @@ settings = [
     ['Выдачи в рамках лимита', '91319', 'oitga'],
     ['Неис лимиты БГ на дату', '91319', 'iitg'],
     ['Выплачено по требованию БГ', '60315', 'oitga'],
+    ['Дефолтность портфеля', '60315', 'oitga', '91315', 'iitg'],
+    ['Доходность выдач', '47502', 'oitga', '91315', 'oitgp']
 ]
 
 layout1 = [
@@ -236,18 +279,21 @@ while True:
     if ev1 in (None, 'Exit'):
         break
     elif ev1 == 'Взять данные':
+        dates = []
+        banks_data, banks_name = {}, {}
+        t_smonth = temp_smonth
+        t_syear = temp_syear
         while True:
-            if (syear < fyear) or (fyear == syear and smonth <= fmonth):
-                month = f'{smonth:2}'.replace(' ', '0')
-                dates.append(f'{syear}-{month}-01')
-                if smonth == 12:
-                    smonth=0
-                    syear+=1
+            if (t_syear < temp_fyear) or (temp_fyear == t_syear and t_smonth <= temp_fmonth):
+                month = f'{t_smonth:2}'.replace(' ', '0')
+                dates.append(f'{t_syear}-{month}-01')
+                if t_smonth == 12:
+                    t_smonth = 1
+                    t_syear += 1
                 else:
-                    smonth += 1
+                    t_smonth += 1
             else:
                 break
-
         regnums = list(
             set(val1['-REGNUMS-'].replace(' ', ',').split(sep=','))
         )
@@ -256,13 +302,15 @@ while True:
         # проверить на int str
         banks_data, banks_name = get_banks_data_and_name(regnums, settings, dates)
         regnums_for_listbox = [
-            f'{code:>15} | {"нет данных за этот период" if isinstance(name, bool) else name:<20}'.replace(' ', ' ')
+            f'{code:>8} | {"нет данных за этот период" if isinstance(name, bool) else name:<20}'.replace(' ', ' ')
             for code, name in banks_name.items()
         ]
         win1['-LISTBOX-'].update(regnums_for_listbox)
     elif ev1 == 'Сохранить':
         if banks_data and banks_name:
-            save_excel_data(banks_data, banks_name)
+            save_excel_data(banks_data, banks_name, Path(val1['-PATH-']))
+        banks_data, banks_name = {}, {}
+        win1['-LISTBOX-'].update([''])
     elif ev1 == 'Удалить':
         if val1['-LISTBOX-']:
             for key in [value.split()[0] for value in val1['-LISTBOX-']]:
@@ -284,7 +332,9 @@ while True:
                 sg.Frame('Текущие настройки', [
                         [
                             sg.Listbox(values=[
-                                    f'{setting[0]:<40} | {setting[1]:>6} | {setting[2]:<3}' for setting in to_num(settings)
+                                    f'{setting[0]:<20} | {setting[1]:>6} | {setting[2]:<3}' if len(setting) == 3
+                                    else f'{setting[0]:<20} || {setting[1]:>6} | {setting[2]:<3} / {setting[3]:>6} | {setting[4]:<3}'
+                                    for setting in to_num(settings)
                                 ], select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE, key='-SLISTBOX-')
                         ],
                         [sg.Button('Вверх'), sg.Button('Вниз'), sg.Button('Удалить')]
@@ -293,7 +343,7 @@ while True:
             ],
             [
                 sg.Frame('(Имя столбца, номер строки, номер столбца)', [
-                        [sg.Text('Номера банков'), sg.InputText('', key='-SETTINGS-')],
+                        [sg.InputText('', key='-SETTINGS-')],
                         [sg.Button('Добавить')]
                     ]
                 )
@@ -301,12 +351,12 @@ while True:
             [
                 sg.Frame('Начало', [[
                         sg.Text('Год'), sg.InputText(f'{syear}', size=(45, 20), key='-SYEAR-'),
-                        sg.Text('Месяц'), sg.InputText(f'{smonth-1}', size=(30, 20), key='-SMONTH-'),
+                        sg.Text('Месяц'), sg.InputText(f'{smonth}', size=(30, 20), key='-SMONTH-'),
                     ]],
                 ),
                 sg.Frame('Конец', [[
                         sg.Text('Год'), sg.InputText(f'{fyear}', size=(45, 20), key='-FYEAR-'),
-                        sg.Text('Месяц'), sg.InputText(f'{fmonth-1}', size=(30, 20), key='-FMONTH-')
+                        sg.Text('Месяц'), sg.InputText(f'{fmonth}', size=(30, 20), key='-FMONTH-')
                     ]]
                 )
             ],
@@ -329,11 +379,23 @@ while True:
                     element = elem.split(', ')
                     if len(element) == 3:
                         try:
+                            int(element[1])
                             f_s.append([element[0], element[1], int(element[2])])
                         except (ValueError, IndexError):
                             continue
+                    if len(element) == 5:
+                        try:
+                            int(element[1])
+                            int(element[3])
+                            f_s.append([element[0], element[1], int(element[2]), element[3], int(element[4])])
+                        except (ValueError, IndexError):
+                            continue
                 settings += to_str(f_s)
-                lis = [f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' for sett in to_num(settings)]
+                lis = [
+                    f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
+                    else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
+                    for sett in to_num(settings)
+                ]
                 win2['-SLISTBOX-'].update(lis)
             if ev2 == 'Вверх':
                 if val2['-SLISTBOX-']:
@@ -349,7 +411,11 @@ while True:
                             settings[i], settings[i-1] = settings[i-1], settings[i]
                             break
                         i += 1
-                lis = [f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' for sett in to_num(settings)]
+                lis = [
+                    f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
+                    else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
+                    for sett in to_num(settings)
+                ]
                 win2['-SLISTBOX-'].update(lis)
             if ev2 == 'Вниз':
                 if val2['-SLISTBOX-']:
@@ -365,7 +431,11 @@ while True:
                             settings[i], settings[i+1] = settings[i+1], settings[i]
                             break
                         i += 1
-                lis = [f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' for sett in to_num(settings)]
+                lis = [
+                    f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
+                    else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
+                    for sett in to_num(settings)
+                ]
                 win2['-SLISTBOX-'].update(lis)
             if ev2 == 'Удалить':
                 if val2['-SLISTBOX-']:
@@ -375,19 +445,26 @@ while True:
                             if setting[0] == zero_set:
                                 settings.remove(setting)
                                 break
-                lis = [f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' for sett in to_num(settings)]
+                lis = [
+                    f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
+                    else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
+                    for sett in to_num(settings)
+                ]
                 win2['-SLISTBOX-'].update(lis)
             if ev2 == 'Сохранить даты':
+                dates = []
                 syear, fyear = int(val2['-SYEAR-']), int(val2['-FYEAR-'])
                 smonth, fmonth = int(val2['-SMONTH-']), int(val2['-FMONTH-'])
                 if smonth == 12:
-                    smonth = 0
-                    syear += 1
+                    temp_smonth = 1
+                    temp_syear = syear + 1
                 else:
-                    smonth += 1
+                    temp_smonth = smonth + 1
+                    temp_syear = syear
                 if fmonth == 12:
-                    fmonth = 0
-                    fyear += 1
+                    temp_fmonth = 1
+                    temp_fyear = fyear + 1
                 else:
-                    fmonth += 1
+                    temp_fyear = fyear
+                    temp_fmonth = fmonth + 1
 win1.close()
