@@ -1,14 +1,13 @@
-#!/usr/bin/env Python3
-import PySimpleGUIQt as sg
-from pandas import DataFrame
-from os.path import dirname
-from collections import OrderedDict
-import pandas as pd
+import re
 from pathlib import Path
-from zeep import Client
+from os.path import dirname
 from datetime import datetime
 from dateutil.parser import parse
-import re
+from collections import OrderedDict
+
+import pandas as pd
+from zeep import Client
+import PySimpleGUIQt as sg
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Side
@@ -319,6 +318,7 @@ while True:
                     del banks_name[key]
                 except KeyError:
                     continue
+        banks_name = {key: banks_name[key] for key in banks_data.keys()}
         regnums_for_listbox = [
             f'{code:>8} | {"нет данных за этот период" if isinstance(name, bool) else name:<20}'.replace(' ', ' ')
             for code, name in banks_name.items()
