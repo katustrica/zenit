@@ -2,13 +2,10 @@ from zeep import Client
 from datetime import datetime, timedelta
 from dateutil.parser import parse
 import pandas as pd
-from collections import OrderedDict
 from pprint import pprint
 from lxml import etree
-import openpyxl
-from openpyxl.styles import Alignment
 
-cl = Client("http://cbr.ru/CreditInfoWebServ/CreditOrgInfo.asmx?wsdl")
+
 regnums = [1481, 415222]
 table_conf = [
     ['Выдано БГ', '91315', 'oitgp'],
@@ -19,7 +16,6 @@ table_conf = [
     ['Неис лимиты БГ на дату', '91319', 'iitg'],
     ['Выплачено по требованию БГ', '60315', 'oitga'],
 ]
-dates = ['2019-02-01', '2019-03-01', '2019-04-01', '2019-05-01', '2019-06-01', '2019-07-01', '2019-08-01', '2019-09-01', '2019-10-01']
 
 
 def get_banks_data_and_name(regnums, table_conf, dates):
