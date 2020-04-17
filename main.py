@@ -274,197 +274,200 @@ win2_active = False
 banks_data, banks_name = {}, {}
 dates = []
 while True:
-    ev1, val1 = win1.read(timeout=100)
-    if ev1 in (None, 'Exit'):
-        break
-    elif ev1 == 'Взять данные':
-        dates = []
-        banks_data, banks_name = {}, {}
-        t_smonth = temp_smonth
-        t_syear = temp_syear
-        while True:
-            if (t_syear < temp_fyear) or (temp_fyear == t_syear and t_smonth <= temp_fmonth):
-                month = f'{t_smonth:2}'.replace(' ', '0')
-                dates.append(f'{t_syear}-{month}-01')
-                if t_smonth == 12:
-                    t_smonth = 1
-                    t_syear += 1
+    try:
+        ev1, val1 = win1.read(timeout=100)
+        if ev1 in (None, 'Exit'):
+            break
+        elif ev1 == 'Взять данные':
+            dates = []
+            banks_data, banks_name = {}, {}
+            t_smonth = temp_smonth
+            t_syear = temp_syear
+            while True:
+                if (t_syear < temp_fyear) or (temp_fyear == t_syear and t_smonth <= temp_fmonth):
+                    month = f'{t_smonth:2}'.replace(' ', '0')
+                    dates.append(f'{t_syear}-{month}-01')
+                    if t_smonth == 12:
+                        t_smonth = 1
+                        t_syear += 1
+                    else:
+                        t_smonth += 1
                 else:
-                    t_smonth += 1
-            else:
-                break
-        regnums = list(
-            set(val1['-REGNUMS-'].replace(' ', ',').split(sep=','))
-        )
-        if '' in regnums:
-            regnums.remove('')
-        # проверить на int str
-        banks_data, banks_name = get_banks_data_and_name(regnums, settings, dates)
-        regnums_for_listbox = [
-            f'{code:>8} | {"нет данных за этот период" if isinstance(name, bool) else name:<20}'.replace(' ', ' ')
-            for code, name in banks_name.items()
-        ]
-        win1['-LISTBOX-'].update(regnums_for_listbox)
-    elif ev1 == 'Сохранить':
-        if banks_data and banks_name:
-            save_excel_data(banks_data, banks_name, Path(val1['-PATH-']))
-        banks_data, banks_name = {}, {}
-        win1['-LISTBOX-'].update([''])
-    elif ev1 == 'Удалить':
-        if val1['-LISTBOX-']:
-            for key in [value.split()[0] for value in val1['-LISTBOX-']]:
-                try:
-                    del banks_data[key]
-                    del banks_name[key]
-                except KeyError:
-                    continue
-        banks_name = {key: banks_name[key] for key in banks_data.keys()}
-        regnums_for_listbox = [
-            f'{code:>8} | {"нет данных за этот период" if isinstance(name, bool) else name:<20}'.replace(' ', ' ')
-            for code, name in banks_name.items()
-        ]
-        win1['-LISTBOX-'].update(regnums_for_listbox)
-    elif ev1 == 'Настройки парсинга':
-        win2_active = True
-        win1.Hide()
-        layout2 = [
-            [
-                sg.Frame('Текущие настройки', [
-                        [
-                            sg.Listbox(values=[
-                                    f'{setting[0]:<20} | {setting[1]:>6} | {setting[2]:<3}' if len(setting) == 3
-                                    else f'{setting[0]:<20} || {setting[1]:>6} | {setting[2]:<3} / {setting[3]:>6} | {setting[4]:<3}'
-                                    for setting in to_num(settings)
-                                ], select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE, key='-SLISTBOX-')
-                        ],
-                        [sg.Button('Вверх'), sg.Button('Вниз'), sg.Button('Удалить')]
-                    ]
-                )
-            ],
-            [
-                sg.Frame('(Имя столбца, номер строки, номер столбца)', [
-                        [sg.InputText('', key='-SETTINGS-')],
-                        [sg.Button('Добавить')]
-                    ]
-                )
-            ],
-            [
-                sg.Frame('Начало', [[
-                        sg.Text('Год'), sg.InputText(f'{syear}', size=(45, 20), key='-SYEAR-'),
-                        sg.Text('Месяц'), sg.InputText(f'{smonth}', size=(30, 20), key='-SMONTH-'),
-                    ]],
-                ),
-                sg.Frame('Конец', [[
-                        sg.Text('Год'), sg.InputText(f'{fyear}', size=(45, 20), key='-FYEAR-'),
-                        sg.Text('Месяц'), sg.InputText(f'{fmonth}', size=(30, 20), key='-FMONTH-')
-                    ]]
-                )
-            ],
-            [sg.Button('Сохранить даты')]
-        ]
-        win2 = sg.Window('Настройки', layout2)
-        while True:
-            ev2, val2 = win2.Read()
-            if ev2 in (None, 'Exit'):
-                win2.close()
-                win2_active = False
-                win1.UnHide()
-                break
-            if ev2 == 'Добавить':
-                # filtered settings
-                f_s = []
-                # readed settings
-                r_s = re.split(r'[()]', val2['-SETTINGS-'])
-                for elem in r_s:
-                    element = elem.split(', ')
-                    if len(element) == 3:
-                        try:
-                            int(element[1])
-                            f_s.append([element[0], element[1], int(element[2])])
-                        except (ValueError, IndexError):
-                            continue
-                    if len(element) == 5:
-                        try:
-                            int(element[1])
-                            int(element[3])
-                            f_s.append([element[0], element[1], int(element[2]), element[3], int(element[4])])
-                        except (ValueError, IndexError):
-                            continue
-                settings += to_str(f_s)
-                lis = [
-                    f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
-                    else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
-                    for sett in to_num(settings)
-                ]
-                win2['-SLISTBOX-'].update(lis)
-            if ev2 == 'Вверх':
-                if val2['-SLISTBOX-']:
-                    if len(val2['-SLISTBOX-']) > 1:
+                    break
+            regnums = list(
+                set(val1['-REGNUMS-'].replace(' ', ',').split(sep=','))
+            )
+            if '' in regnums:
+                regnums.remove('')
+            # проверить на int str
+            banks_data, banks_name = get_banks_data_and_name(regnums, settings, dates)
+            regnums_for_listbox = [
+                f'{code:>8} | {"нет данных за этот период" if isinstance(name, bool) else name:<20}'.replace(' ', ' ')
+                for code, name in banks_name.items()
+            ]
+            win1['-LISTBOX-'].update(regnums_for_listbox)
+        elif ev1 == 'Сохранить':
+            if banks_data and banks_name:
+                save_excel_data(banks_data, banks_name, Path(val1['-PATH-']))
+            banks_data, banks_name = {}, {}
+            win1['-LISTBOX-'].update([''])
+        elif ev1 == 'Удалить':
+            if val1['-LISTBOX-']:
+                for key in [value.split()[0] for value in val1['-LISTBOX-']]:
+                    try:
+                        del banks_data[key]
+                        del banks_name[key]
+                    except KeyError:
                         continue
-                    key = val2['-SLISTBOX-'][0].split('|')[0]
-                    zero_set = " ".join([el for el in key.strip().split(' ') if el.strip()])
-                    i = 0
-                    for setting in settings:
-                        if setting[0] == zero_set:
-                            if i == 0:
+            banks_name = {key: banks_name[key] for key in banks_data.keys()}
+            regnums_for_listbox = [
+                f'{code:>8} | {"нет данных за этот период" if isinstance(name, bool) else name:<20}'.replace(' ', ' ')
+                for code, name in banks_name.items()
+            ]
+            win1['-LISTBOX-'].update(regnums_for_listbox)
+        elif ev1 == 'Настройки парсинга':
+            win2_active = True
+            win1.Hide()
+            layout2 = [
+                [
+                    sg.Frame('Текущие настройки', [
+                            [
+                                sg.Listbox(values=[
+                                        f'{setting[0]:<20} | {setting[1]:>6} | {setting[2]:<3}' if len(setting) == 3
+                                        else f'{setting[0]:<20} || {setting[1]:>6} | {setting[2]:<3} / {setting[3]:>6} | {setting[4]:<3}'
+                                        for setting in to_num(settings)
+                                    ], select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE, key='-SLISTBOX-')
+                            ],
+                            [sg.Button('Вверх'), sg.Button('Вниз'), sg.Button('Удалить')]
+                        ]
+                    )
+                ],
+                [
+                    sg.Frame('(Имя столбца, номер строки, номер столбца)', [
+                            [sg.InputText('', key='-SETTINGS-')],
+                            [sg.Button('Добавить')]
+                        ]
+                    )
+                ],
+                [
+                    sg.Frame('Начало', [[
+                            sg.Text('Год'), sg.InputText(f'{syear}', size=(45, 20), key='-SYEAR-'),
+                            sg.Text('Месяц'), sg.InputText(f'{smonth}', size=(30, 20), key='-SMONTH-'),
+                        ]],
+                    ),
+                    sg.Frame('Конец', [[
+                            sg.Text('Год'), sg.InputText(f'{fyear}', size=(45, 20), key='-FYEAR-'),
+                            sg.Text('Месяц'), sg.InputText(f'{fmonth}', size=(30, 20), key='-FMONTH-')
+                        ]]
+                    )
+                ],
+                [sg.Button('Сохранить даты')]
+            ]
+            win2 = sg.Window('Настройки', layout2)
+            while True:
+                ev2, val2 = win2.Read()
+                if ev2 in (None, 'Exit'):
+                    win2.close()
+                    win2_active = False
+                    win1.UnHide()
+                    break
+                if ev2 == 'Добавить':
+                    # filtered settings
+                    f_s = []
+                    # readed settings
+                    r_s = re.split(r'[()]', val2['-SETTINGS-'])
+                    for elem in r_s:
+                        element = elem.split(', ')
+                        if len(element) == 3:
+                            try:
+                                int(element[1])
+                                f_s.append([element[0], element[1], int(element[2])])
+                            except (ValueError, IndexError):
                                 continue
-                            settings[i], settings[i-1] = settings[i-1], settings[i]
-                            break
-                        i += 1
-                lis = [
-                    f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
-                    else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
-                    for sett in to_num(settings)
-                ]
-                win2['-SLISTBOX-'].update(lis)
-            if ev2 == 'Вниз':
-                if val2['-SLISTBOX-']:
-                    if len(val2['-SLISTBOX-']) > 1:
-                        continue
-                    key = val2['-SLISTBOX-'][0].split('|')[0]
-                    zero_set = " ".join([el for el in key.strip().split(' ') if el.strip()])
-                    i = 0
-                    for setting in settings:
-                        if setting[0] == zero_set:
-                            if i == len(settings)-1:
+                        if len(element) == 5:
+                            try:
+                                int(element[1])
+                                int(element[3])
+                                f_s.append([element[0], element[1], int(element[2]), element[3], int(element[4])])
+                            except (ValueError, IndexError):
                                 continue
-                            settings[i], settings[i+1] = settings[i+1], settings[i]
-                            break
-                        i += 1
-                lis = [
-                    f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
-                    else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
-                    for sett in to_num(settings)
-                ]
-                win2['-SLISTBOX-'].update(lis)
-            if ev2 == 'Удалить':
-                if val2['-SLISTBOX-']:
-                    for key in [value.split('|')[0] for value in val2['-SLISTBOX-']]:
+                    settings += to_str(f_s)
+                    lis = [
+                        f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
+                        else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
+                        for sett in to_num(settings)
+                    ]
+                    win2['-SLISTBOX-'].update(lis)
+                if ev2 == 'Вверх':
+                    if val2['-SLISTBOX-']:
+                        if len(val2['-SLISTBOX-']) > 1:
+                            continue
+                        key = val2['-SLISTBOX-'][0].split('|')[0]
                         zero_set = " ".join([el for el in key.strip().split(' ') if el.strip()])
+                        i = 0
                         for setting in settings:
                             if setting[0] == zero_set:
-                                settings.remove(setting)
+                                if i == 0:
+                                    continue
+                                settings[i], settings[i-1] = settings[i-1], settings[i]
                                 break
-                lis = [
-                    f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
-                    else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
-                    for sett in to_num(settings)
-                ]
-                win2['-SLISTBOX-'].update(lis)
-            if ev2 == 'Сохранить даты':
-                dates = []
-                syear, fyear = int(val2['-SYEAR-']), int(val2['-FYEAR-'])
-                smonth, fmonth = int(val2['-SMONTH-']), int(val2['-FMONTH-'])
-                if smonth == 12:
-                    temp_smonth = 1
-                    temp_syear = syear + 1
-                else:
-                    temp_smonth = smonth + 1
-                    temp_syear = syear
-                if fmonth == 12:
-                    temp_fmonth = 1
-                    temp_fyear = fyear + 1
-                else:
-                    temp_fyear = fyear
-                    temp_fmonth = fmonth + 1
+                            i += 1
+                    lis = [
+                        f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
+                        else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
+                        for sett in to_num(settings)
+                    ]
+                    win2['-SLISTBOX-'].update(lis)
+                if ev2 == 'Вниз':
+                    if val2['-SLISTBOX-']:
+                        if len(val2['-SLISTBOX-']) > 1:
+                            continue
+                        key = val2['-SLISTBOX-'][0].split('|')[0]
+                        zero_set = " ".join([el for el in key.strip().split(' ') if el.strip()])
+                        i = 0
+                        for setting in settings:
+                            if setting[0] == zero_set:
+                                if i == len(settings)-1:
+                                    continue
+                                settings[i], settings[i+1] = settings[i+1], settings[i]
+                                break
+                            i += 1
+                    lis = [
+                        f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
+                        else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
+                        for sett in to_num(settings)
+                    ]
+                    win2['-SLISTBOX-'].update(lis)
+                if ev2 == 'Удалить':
+                    if val2['-SLISTBOX-']:
+                        for key in [value.split('|')[0] for value in val2['-SLISTBOX-']]:
+                            zero_set = " ".join([el for el in key.strip().split(' ') if el.strip()])
+                            for setting in settings:
+                                if setting[0] == zero_set:
+                                    settings.remove(setting)
+                                    break
+                    lis = [
+                        f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
+                        else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
+                        for sett in to_num(settings)
+                    ]
+                    win2['-SLISTBOX-'].update(lis)
+                if ev2 == 'Сохранить даты':
+                    dates = []
+                    syear, fyear = int(val2['-SYEAR-']), int(val2['-FYEAR-'])
+                    smonth, fmonth = int(val2['-SMONTH-']), int(val2['-FMONTH-'])
+                    if smonth == 12:
+                        temp_smonth = 1
+                        temp_syear = syear + 1
+                    else:
+                        temp_smonth = smonth + 1
+                        temp_syear = syear
+                    if fmonth == 12:
+                        temp_fmonth = 1
+                        temp_fyear = fyear + 1
+                    else:
+                        temp_fyear = fyear
+                        temp_fmonth = fmonth + 1
+    except Exception as e:
+        sg.PopupNonBlocking(e)
 win1.close()
