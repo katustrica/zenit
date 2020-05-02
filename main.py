@@ -6,6 +6,7 @@ from dateutil.parser import parse
 from collections import OrderedDict
 
 import pandas as pd
+import numpy as np
 from zeep import Client
 import PySimpleGUIQt as sg
 
@@ -18,8 +19,24 @@ smonth, fmonth = 1, 1
 
 temp_syear, temp_fyear = today.year-1, today.year-1
 temp_smonth, temp_fmonth = 2, 2
-
-
+months_name = {
+    '01': 'Январь',
+    '02': 'Февраль',
+    '03': 'Март',
+    '04': 'Апрель',
+    '05': 'Май',
+    '06': 'Июнь',
+    '07': 'Июль',
+    '08': 'Август',
+    '09': 'Сентябрь',
+    '10': 'Октябрь',
+    '11': 'Ноябрь',
+    '12': 'Декабрь'
+}
+color_popup = '#b1b6fa'
+color_popup_ok = '#c5ffc2'
+color_popup_info = '#fcfcd2'
+sg.ChangeLookAndFeel('TanBlue')
 def get_banks_data_and_name(regnums, table_conf, dates):
     cl = Client("http://cbr.ru/CreditInfoWebServ/CreditOrgInfo.asmx?wsdl")
     f_dates = []
@@ -32,9 +49,9 @@ def get_banks_data_and_name(regnums, table_conf, dates):
             f_date_month = f'{month - 1:2}'.replace(' ', '0')
             f_date_year = year
         else:
-            f_date_month = 12
+            f_date_month = '12'
             f_date_year = year - 1
-        f_dates.append(f'{f_date_month}.{f_date_year}')
+        f_dates.append(f'{months_name[f_date_month]} {f_date_year}')
     row_columns = {table[1]: {} for table in table_conf}
     row_columns_divide = {table[1]: {} for table in table_conf}
     row_names = []
@@ -91,60 +108,63 @@ def get_banks_data_and_name(regnums, table_conf, dates):
         if isinstance(data, bool):
             regnums.remove(name)
     sorted_bank_data = {regnum: {f_date: OrderedDict() for f_date in f_dates} for regnum in regnums}
+    row_columns_names = sum([list(row.values()) for row in row_columns.values()], [])
     for regnum in regnums:
         for f_date in f_dates:
             for row_name in row_names:
                 if row_name in banks_data[regnum][f_date].keys():
                     value = banks_data[regnum][f_date][row_name]
-                    if isinstance(value, str):
+                    if isinstance(value, str) and row_name in row_columns_names:
                         value = value[:-5]
                         sorted_bank_data[regnum][f_date][row_name] = '{0:,}'.format(int(value)).replace(',', ' ')
                     elif isinstance(value, float):
                         sorted_bank_data[regnum][f_date][row_name] = f'{value}%'
+                    else:
+                        sorted_bank_data[regnum][f_date][row_name] = 'Нет данных'
                 else:
                     sorted_bank_data[regnum][f_date][row_name] = 'Нет данных'
     return sorted_bank_data, banks_name
 
-
 def save_excel_data(banks_data, banks_name, path):
-    thin_border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
+
+    date = datetime.now().strftime("%H %M %S %d-%m-%Y")
+    writer = pd.ExcelWriter(path / f'Результаты {date}.xlsx', engine='xlsxwriter')
+
+    banks_data_df = {}
     for regnum, data in banks_data.items():
         name = banks_name[regnum]
         if name is True:
             continue
         df = pd.DataFrame.from_dict(data).reindex([setting[0] for setting in settings])
-        name = name.replace('"', '')
-        df.to_excel(path / f'{name}.xlsx')
-        wb = openpyxl.load_workbook(path / f'{name}.xlsx')
-        worksheet = wb.active
-        for col in worksheet.columns:
-            max_length = 0
-            column = col[0].column_letter
-            for cell in col:
-                if cell.column_letter == 'A':
-                    cell.alignment = Alignment(horizontal='left')
+        for setting in growth_settings:
+            if len(df.iloc[setting[1]-1]) < 2:
+                continue
+            try:
+                first_growth = np.array([float(value.replace(' ', '')) for value in df.iloc[setting[1]-1]][:-1])
+                second_growth = np.array([float(value.replace(' ', '')) for value in df.iloc[setting[1]-1]][1:])
+                growht = (second_growth / first_growth) - 1
+                df.loc[setting[0]] = ['']+[f'{num:.2}%' for num in np.around(growht, 3)*100]
+            except Exception as e:
+                sg.popup_auto_close(f'Не корректные данные для составления роста у банка - {name}', background_color=color_popup_info, no_titlebar=True)
+        banks_data_df[name] = df
+    for i, df in enumerate(banks_data_df.values()):
+        df.to_excel(writer, sheet_name='Sheet1', startrow=i*(len(settings) + len(growth_settings) + 3) + 1, startcol=1, index=False)
+    workbook  = writer.book
+    worksheet = writer.sheets['Sheet1']
+    worksheet.set_column('A:A', 30)
+    worksheet.set_column('B:AD', 15)
 
-                elif cell.row != 1:
-                    cell.alignment = Alignment(horizontal='right')
-                cell.border = thin_border
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(cell.value)
-                except:
-                    pass
-            adjusted_width = (max_length + 2) * 1.2
-            worksheet.column_dimensions[column].width = adjusted_width
-        worksheet.append(['Название банка', f'{name}'])
-        worksheet.move_range(f'A1:{[r for r in worksheet.rows][-1][-1].coordinate}', rows=1)
-        last_row_number = [r for r in worksheet.rows][-1][-1].row
-        worksheet.move_range(f'A{last_row_number}:B{last_row_number}', rows=-(last_row_number-1))
-        wb.save(path / f'{name}.xlsx')
-
+    cell_format_bank = workbook.add_format({'bold': False, 'align': 'left'})
+    cell_format_bank_name = workbook.add_format({'bold': True, 'align': 'left'})
+    cell_format_left_bold = workbook.add_format({'bold': True, 'align': 'left', 'border': 2})
+    cell_format_border = workbook.add_format({'border': 1})
+    for i, name in enumerate(banks_data_df.keys()):
+        for j, setting in enumerate(settings + growth_settings, 2):
+            worksheet.write(i*(len(settings) + len(growth_settings) + 3) + j, 0, f'{setting[0]}', cell_format_left_bold)
+            worksheet.set_row(i*(len(settings) + len(growth_settings) + 3) + j, None, cell_format_border)
+        worksheet.write(i*(len(settings) + len(growth_settings) + 3), 0, 'Название банка:', cell_format_bank)
+        worksheet.write(i*(len(settings) + len(growth_settings) + 3), 1, f'{name}', cell_format_bank_name)
+    workbook.close()
 
 def to_num(settings):
     setting_num = []
@@ -186,7 +206,6 @@ def to_num(settings):
         if size == 5:
             setting_num.append([setting[0], setting[1], num[0], setting[3], num[1]])
     return setting_num
-
 
 def to_str(settings):
     setting_num = []
@@ -242,6 +261,10 @@ settings = [
     ['Доходность выдач', '47502', 'oitga', '91315', 'oitgp']
 ]
 
+growth_settings = [
+    ['Изменение портфеля', 3]
+]
+
 layout1 = [
     [
         sg.Frame('Номера банков', [[
@@ -265,8 +288,7 @@ layout1 = [
                 sg.Button('Сохранить')
             ]]
         )
-    ],
-    [sg.ProgressBar(1000, orientation='h', key='progressbar')]
+    ]
 ]
 
 win1 = sg.Window('101 форма', layout1)
@@ -294,23 +316,24 @@ while True:
                         t_smonth += 1
                 else:
                     break
-            regnums = list(
-                set(val1['-REGNUMS-'].replace(' ', ',').split(sep=','))
-            )
+            regnums = val1['-REGNUMS-'].replace(' ', ',').split(sep=',')
             if '' in regnums:
                 regnums.remove('')
             # проверить на int str
+            sg.popup_auto_close('Беру данные', background_color=color_popup, auto_close_duration=2, no_titlebar=True)
             banks_data, banks_name = get_banks_data_and_name(regnums, settings, dates)
             regnums_for_listbox = [
                 f'{code:>8} | {"нет данных за этот период" if isinstance(name, bool) else name:<20}'.replace(' ', ' ')
                 for code, name in banks_name.items()
             ]
+            sg.popup_ok('Взял данные', background_color=color_popup_ok, no_titlebar=True)
             win1['-LISTBOX-'].update(regnums_for_listbox)
         elif ev1 == 'Сохранить':
             if banks_data and banks_name:
                 save_excel_data(banks_data, banks_name, Path(val1['-PATH-']))
             banks_data, banks_name = {}, {}
             win1['-LISTBOX-'].update([''])
+            sg.popup_auto_close('Сохранил файл', background_color=color_popup_ok, auto_close_duration=2, no_titlebar=True)
         elif ev1 == 'Удалить':
             if val1['-LISTBOX-']:
                 for key in [value.split()[0] for value in val1['-LISTBOX-']]:
@@ -350,6 +373,26 @@ while True:
                     )
                 ],
                 [
+                    sg.Frame('Отслеживание роста', [
+                            [
+                                sg.Listbox(values=[
+                                        f'{sett[0]:<20} | {sett[1]:>3}' for sett in growth_settings
+                                    ], select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE, key='-SLISTBOX_GROWTH-')
+                            ],
+                            [
+                                sg.Button('Удалить отслеживание')
+                            ]
+                        ]
+                    )
+                ],
+                [
+                    sg.Frame('(Имя столбца, номер строки для отслеживания роста)', [
+                            [sg.InputText('', key='-SETTINGS2-')],
+                            [sg.Button('Добавить отслеживание')]
+                        ]
+                    )
+                ],
+                [
                     sg.Frame('Начало', [[
                             sg.Text('Год'), sg.InputText(f'{syear}', size=(45, 20), key='-SYEAR-'),
                             sg.Text('Месяц'), sg.InputText(f'{smonth}', size=(30, 20), key='-SMONTH-'),
@@ -361,12 +404,27 @@ while True:
                         ]]
                     )
                 ],
-                [sg.Button('Сохранить даты')]
+                [sg.Button('Сохранить даты')],
+                [sg.Button('Назад')]
             ]
             win2 = sg.Window('Настройки', layout2)
+            def update_setting_listbox():
+                lis = [
+                    f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
+                    else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
+                    for sett in to_num(settings)
+                ]
+                win2['-SLISTBOX-'].update(lis)
+
+                lis2 = [
+                        f'{sett[0]:<20} | {sett[1]:>3}' for sett in growth_settings
+                    ]
+                win2['-SLISTBOX_GROWTH-'].update(lis2)
+
+
             while True:
                 ev2, val2 = win2.Read()
-                if ev2 in (None, 'Exit'):
+                if ev2 in (None, 'Exit', 'Назад'):
                     win2.close()
                     win2_active = False
                     win1.UnHide()
@@ -392,12 +450,22 @@ while True:
                             except (ValueError, IndexError):
                                 continue
                     settings += to_str(f_s)
-                    lis = [
-                        f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
-                        else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
-                        for sett in to_num(settings)
-                    ]
-                    win2['-SLISTBOX-'].update(lis)
+                    update_setting_listbox()
+                if ev2 == 'Добавить отслеживание':
+                    # filtered settings
+                    f_s = []
+                    # readed settings
+                    r_s = re.split(r'[()]', val2['-SETTINGS2-'])
+                    for elem in r_s:
+                        element = elem.split(', ')
+                        if len(element) == 2:
+                            try:
+                                int(element[1])
+                                f_s.append([element[0], int(element[1])])
+                            except (ValueError, IndexError):
+                                continue
+                    growth_settings += f_s
+                    update_setting_listbox()
                 if ev2 == 'Вверх':
                     if val2['-SLISTBOX-']:
                         if len(val2['-SLISTBOX-']) > 1:
@@ -412,12 +480,7 @@ while True:
                                 settings[i], settings[i-1] = settings[i-1], settings[i]
                                 break
                             i += 1
-                    lis = [
-                        f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
-                        else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
-                        for sett in to_num(settings)
-                    ]
-                    win2['-SLISTBOX-'].update(lis)
+                    update_setting_listbox()
                 if ev2 == 'Вниз':
                     if val2['-SLISTBOX-']:
                         if len(val2['-SLISTBOX-']) > 1:
@@ -432,12 +495,7 @@ while True:
                                 settings[i], settings[i+1] = settings[i+1], settings[i]
                                 break
                             i += 1
-                    lis = [
-                        f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
-                        else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
-                        for sett in to_num(settings)
-                    ]
-                    win2['-SLISTBOX-'].update(lis)
+                    update_setting_listbox()
                 if ev2 == 'Удалить':
                     if val2['-SLISTBOX-']:
                         for key in [value.split('|')[0] for value in val2['-SLISTBOX-']]:
@@ -446,12 +504,16 @@ while True:
                                 if setting[0] == zero_set:
                                     settings.remove(setting)
                                     break
-                    lis = [
-                        f'{sett[0]:<20} | {sett[1]:>6} | {sett[2]:<3}' if len(sett) == 3
-                        else f'{sett[0]:<20} || {sett[1]:>6} | {sett[2]:<3} / {sett[3]:>6} | {sett[4]:<3}'
-                        for sett in to_num(settings)
-                    ]
-                    win2['-SLISTBOX-'].update(lis)
+                    update_setting_listbox()
+                if ev2 == 'Удалить отслеживание':
+                    if val2['-SLISTBOX_GROWTH-']:
+                        for key in [value.split('|')[0] for value in val2['-SLISTBOX_GROWTH-']]:
+                            zero_set = " ".join([el for el in key.strip().split(' ') if el.strip()])
+                            for setting in growth_settings:
+                                if setting[0] == zero_set:
+                                    growth_settings.remove(setting)
+                                    break
+                    update_setting_listbox()
                 if ev2 == 'Сохранить даты':
                     dates = []
                     syear, fyear = int(val2['-SYEAR-']), int(val2['-FYEAR-'])
@@ -468,6 +530,8 @@ while True:
                     else:
                         temp_fyear = fyear
                         temp_fmonth = fmonth + 1
+                    sg.popup_auto_close('Сохранил даты', background_color=color_popup, auto_close_duration=1, no_titlebar=True)
     except Exception as e:
         sg.PopupNonBlocking(e)
+        print(e)
 win1.close()
