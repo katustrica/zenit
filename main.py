@@ -33,6 +33,7 @@ months_name = {
 color_popup = '#b1b6fa'
 color_popup_ok = '#c5ffc2'
 color_popup_info = '#fcfcd2'
+select_color = '#ccffcc'
 sg.ChangeLookAndFeel('TanBlue')
 highlight_stroke = 'Выдано БГ'
 
@@ -122,13 +123,12 @@ def get_banks_data_and_name(regnums, table_conf, dates):
                     elif isinstance(value, float):
                         sorted_bank_data[regnum][f_date][row_name] = f'{value}%'
                     else:
-                        sorted_bank_data[regnum][f_date][row_name] = 'Нет данных'
+                        sorted_bank_data[regnum][f_date][row_name] = '-'
                 else:
-                    sorted_bank_data[regnum][f_date][row_name] = 'Нет данных'
+                    sorted_bank_data[regnum][f_date][row_name] = '-'
     return sorted_bank_data, banks_name
 
 def save_excel_data(banks_data, banks_name, path):
-
     date = datetime.now().strftime("%H %M %S %d-%m-%Y")
     writer = pd.ExcelWriter(path / f'Результаты {date}.xlsx', engine='xlsxwriter')
 
@@ -142,25 +142,21 @@ def save_excel_data(banks_data, banks_name, path):
             if len(df.iloc[setting[1]-1]) < 2:
                 continue
             try:
-                first_growth = np.array([float(value.replace(' ', '')) for value in df.iloc[setting[1]-1]][:-1])
-                second_growth = np.array([float(value.replace(' ', '')) for value in df.iloc[setting[1]-1]][1:])
-                growht = (second_growth / first_growth) - 1
-                df.loc[setting[0]] = ['']+[f'{num:.2f}%' for num in np.around(growht, 3)*100]
+                first_growth = np.array([float(value.replace(' ', '')) if value != '-' else np.nan for value in df.iloc[setting[1]-1]][:-1])
+                second_growth = np.array([float(value.replace(' ', '')) if value != '-' else np.nan for value in df.iloc[setting[1]-1]][1:])
+                growht = np.around((second_growth / first_growth) - 1, 3)*100
+                df.loc[setting[0]] = ['']+[f'{num:.2f}%' if not np.isnan(num) else '-' for num in growht]
             except Exception as e:
                 sg.popup_quick_message(f'Не корректные данные для составления роста у банка - {name}', background_color=color_popup_info, no_titlebar=True)
         banks_data_df[name] = df
     df_s_list = []
     for i, (name, df) in enumerate(banks_data_df.items()):
         df_f = df.replace(r'\s+', '',regex=True)
-        df_f = df_f.replace('Нетданных','Нет данных',regex=True)
-        df_f = df_f.applymap(lambda x: int(x) if ('%' not in x and x not in ['Нет данных', 'Нетданных', '']) else x)
+        df_f = df_f.applymap(lambda x: int(x) if ('%' not in x and x not in ['-', '']) else x)
         df_f.to_excel(writer, sheet_name='Sheet1', startrow=i*(len(settings) + len(growth_settings) + 3) + 1, startcol=1, index=False)
-        df_s = pd.DataFrame.from_dict({a: [
-                int(b.replace(' ', '')) if (('%' not in b) and (b not in ['Нет данных', '']) and isinstance(b, str)) else b
-            ] for a, b in df.loc[highlight_stroke].items()}
-        )
+        df_s = pd.DataFrame.from_dict({a: [int(b.replace(' ', '')) if (('%' not in b) and (b not in ['-', '']) and isinstance(b, str)) else b] for a, b in df.loc[highlight_stroke].items()})
         df_s.index = [name]
-        df_s['Итого'] = sum([num for num in df_s.iloc[0]])
+        df_s['Итого'] = sum([num if num!= '-' else 0 for num in df_s.iloc[0]])
         df_s_list.append(df_s)
     df_s_all = pd.concat(df_s_list)
     df_s_all.to_excel(writer, sheet_name='Sheet2', startcol=1, index=False)
@@ -172,28 +168,29 @@ def save_excel_data(banks_data, banks_name, path):
     worksheet2.set_column('A:A', 50)
     worksheet2.set_column('B:AD', 15)
 
-    cell_format_bank = workbook.add_format({'bold': False, 'align': 'left', 'num_format': '#,##0'})
-    cell_format_name = workbook.add_format({'bold': True, 'align': 'left', 'num_format': '#,##0'})
-    cell_format_name_border = workbook.add_format({'bold': True, 'align': 'left', 'right': 1, 'num_format': '#,##0'})
-    cell_format_left_bold = workbook.add_format({'bold': False, 'align': 'left', 'border': 1, 'num_format': '#,##0'})
-    cell_format_border = workbook.add_format({'border': 1, 'num_format': '#,##0', 'align': 'right'})
-    cell_format_border_green_bold = workbook.add_format({'border': 1, 'num_format': '#,##0', 'align': 'right','bg_color': '#ccffcc', 'bold': True})
-    cell_format_border_green_bold_name = workbook.add_format({'border': 1, 'num_format': '#,##0', 'align': 'left','bg_color': '#ccffcc', 'bold': True})
-    cell_format_border_only = workbook.add_format({'border': 7, 'num_format': '#,##0'})
+    format_left = workbook.add_format({'bold': False, 'align': 'left', 'num_format': '#,##0'})
+    format_left_bold = workbook.add_format({'bold': True, 'align': 'left', 'num_format': '#,##0'})
+    format_left_bold_border_right = workbook.add_format({'bold': True, 'align': 'left', 'right': 1, 'num_format': '#,##0'})
+    format_left_border_all = workbook.add_format({'align': 'left', 'border': 1, 'num_format': '#,##0'})
+    format_left_bold_border_all_color = workbook.add_format({'bold': True, 'border': 1, 'align': 'left','bg_color': select_color, 'num_format': '#,##0'})
+    format_right_border_all = workbook.add_format({'align': 'right', 'border': 1, 'num_format': '#,##0'})
+    format_right_bold_border_all_color = workbook.add_format({'bold': True, 'border': 1, 'align': 'right','bg_color': select_color, 'num_format': '#,##0'})
+    format_border_all = workbook.add_format({'border': 7, 'num_format': '#,##0'})
+
     for i, name in enumerate(banks_data_df.keys()):
         for j, setting in enumerate(settings + growth_settings, 2):
             if setting[0] != highlight_stroke:
-                worksheet1.write(i*(len(settings) + len(growth_settings) + 3) + j, 0, f'{setting[0]}', cell_format_left_bold)
-                worksheet1.set_row(i*(len(settings) + len(growth_settings) + 3) + j, None, cell_format_border)
+                worksheet1.write(i*(len(settings) + len(growth_settings) + 3) + j, 0, f'{setting[0]}', format_left_border_all)
+                worksheet1.set_row(i*(len(settings) + len(growth_settings) + 3) + j, None, format_right_border_all)
                 continue
-            worksheet1.write(i*(len(settings) + len(growth_settings) + 3) + j, 0, f'{setting[0]}', cell_format_border_green_bold_name)
-            worksheet1.set_row(i*(len(settings) + len(growth_settings) + 3) + j, None, cell_format_border_green_bold)
-        worksheet1.write(i*(len(settings) + len(growth_settings) + 3), 0, 'Название банка:', cell_format_bank)
-        worksheet1.write(i*(len(settings) + len(growth_settings) + 3), 1, f'{name}', cell_format_name)
+            worksheet1.write(i*(len(settings) + len(growth_settings) + 3) + j, 0, f'{setting[0]}', format_left_bold_border_all_color)
+            worksheet1.set_row(i*(len(settings) + len(growth_settings) + 3) + j, None, format_right_bold_border_all_color)
+        worksheet1.write(i*(len(settings) + len(growth_settings) + 3), 0, 'Название банка:', format_left)
+        worksheet1.write(i*(len(settings) + len(growth_settings) + 3), 1, f'{name}', format_left_bold)
 
     for i, name in enumerate(df_s_all.index.to_list(), 1):
-        worksheet2.write(i, 0, f'{name}', cell_format_name_border)
-        worksheet2.set_row(i, None, cell_format_border_only)
+        worksheet2.write(i, 0, f'{name}', format_left_bold_border_right)
+        worksheet2.set_row(i, None, format_border_all)
     workbook.close()
 
 def to_num(settings):
@@ -294,11 +291,15 @@ settings = [
 growth_settings = [
     ['Изменение портфеля', 3]
 ]
-
+bank_codes = ('1, 101, 328, 354, 436, 963, 1000, 1326, 1354, 1439, '
+              '1470, 1481, 1680, 1927, 1978, 2209, 2216, 2268, 2272, '
+              '2306, 2312, 2440, 2443, 2495, 2557, 2590, 2707, 2738, 2766, '
+              '2790, 2998, 3085, 3251, 3255, 3287, 3290, 3292, 3328, 3333, 3340, '
+              '3349, 3368, 3403, 2546, 2275, 3266, 1067, 1460, 429, 3279')
 layout1 = [
     [
         sg.Frame('Номера банков', [[
-            sg.Text('№, №'), sg.InputText('1481', key='-REGNUMS-'),
+            sg.Text('№, №'), sg.InputText(bank_codes, key='-REGNUMS-'),
             ]]
         )
 
@@ -449,7 +450,6 @@ while True:
                         f'{sett[0]:<20} | {sett[1]:>3}' for sett in growth_settings
                     ]
                 win2['-SLISTBOX_GROWTH-'].update(lis2)
-
 
             while True:
                 ev2, val2 = win2.Read()
