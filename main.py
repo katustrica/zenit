@@ -10,9 +10,6 @@ import numpy as np
 from zeep import Client
 import PySimpleGUIQt as sg
 
-import openpyxl
-from openpyxl.styles import Alignment, Border, Side
-
 today = datetime.today()
 syear, fyear = today.year-1, today.year-1
 smonth, fmonth = 1, 1
@@ -125,10 +122,9 @@ def get_banks_data_and_name(regnums, table_conf, dates):
                     elif isinstance(value, float):
                         sorted_bank_data[regnum][f_date][row_name] = f'{value}%'
                     else:
-                        sorted_bank_data[regnum][f_date][row_name] = '-'
+                        sorted_bank_data[regnum][f_date][row_name] = 'Нет данных'
                 else:
-                    sorted_bank_data[regnum][f_date][row_name] = '-'
-
+                    sorted_bank_data[regnum][f_date][row_name] = 'Нет данных'
     return sorted_bank_data, banks_name
 
 def save_excel_data(banks_data, banks_name, path):
@@ -156,10 +152,11 @@ def save_excel_data(banks_data, banks_name, path):
     df_s_list = []
     for i, (name, df) in enumerate(banks_data_df.items()):
         df_f = df.replace(r'\s+', '',regex=True)
-        df_f = df_f.applymap(lambda x: int(x) if ('%' not in x and x not in ['-', '-', '']) else x)
+        df_f = df_f.replace('Нетданных','Нет данных',regex=True)
+        df_f = df_f.applymap(lambda x: int(x) if ('%' not in x and x not in ['Нет данных', 'Нетданных', '']) else x)
         df_f.to_excel(writer, sheet_name='Sheet1', startrow=i*(len(settings) + len(growth_settings) + 3) + 1, startcol=1, index=False)
         df_s = pd.DataFrame.from_dict({a: [
-                int(b.replace(' ', '')) if (('%' not in b) and (b not in ['-', '']) and isinstance(b, str)) else b
+                int(b.replace(' ', '')) if (('%' not in b) and (b not in ['Нет данных', '']) and isinstance(b, str)) else b
             ] for a, b in df.loc[highlight_stroke].items()}
         )
         df_s.index = [name]
@@ -175,21 +172,21 @@ def save_excel_data(banks_data, banks_name, path):
     worksheet2.set_column('A:A', 50)
     worksheet2.set_column('B:AD', 15)
 
-    cell_format_bank = workbook.add_format({'bold': False, 'align': 'left', 'num_format': '#,##'})
-    cell_format_name = workbook.add_format({'bold': True, 'align': 'left', 'num_format': '#,##'})
-    cell_format_name_border = workbook.add_format({'bold': True, 'align': 'left', 'right': 1, 'num_format': '#,##'})
-    cell_format_left_bold = workbook.add_format({'bold': False, 'align': 'right', 'border': 1, 'num_format': '#,##'})
-    cell_format_border = workbook.add_format({'border': 1, 'num_format': '#,##', 'align': 'right'})
-    cell_format_border_green_bold = workbook.add_format({'border': 1, 'num_format': '#,##', 'align': 'right','bg_color': '#ccffcc', 'bold': True})
-    cell_format_border_green = workbook.add_format({'border': 1, 'num_format': '#,##', 'align': 'right','bg_color': '#ccffcc'})
-    cell_format_border_only = workbook.add_format({'border': 7, 'num_format': '#,##'})
+    cell_format_bank = workbook.add_format({'bold': False, 'align': 'left', 'num_format': '#,##0'})
+    cell_format_name = workbook.add_format({'bold': True, 'align': 'left', 'num_format': '#,##0'})
+    cell_format_name_border = workbook.add_format({'bold': True, 'align': 'left', 'right': 1, 'num_format': '#,##0'})
+    cell_format_left_bold = workbook.add_format({'bold': False, 'align': 'left', 'border': 1, 'num_format': '#,##0'})
+    cell_format_border = workbook.add_format({'border': 1, 'num_format': '#,##0', 'align': 'right'})
+    cell_format_border_green_bold = workbook.add_format({'border': 1, 'num_format': '#,##0', 'align': 'right','bg_color': '#ccffcc', 'bold': True})
+    cell_format_border_green_bold_name = workbook.add_format({'border': 1, 'num_format': '#,##0', 'align': 'left','bg_color': '#ccffcc', 'bold': True})
+    cell_format_border_only = workbook.add_format({'border': 7, 'num_format': '#,##0'})
     for i, name in enumerate(banks_data_df.keys()):
         for j, setting in enumerate(settings + growth_settings, 2):
             if setting[0] != highlight_stroke:
                 worksheet1.write(i*(len(settings) + len(growth_settings) + 3) + j, 0, f'{setting[0]}', cell_format_left_bold)
                 worksheet1.set_row(i*(len(settings) + len(growth_settings) + 3) + j, None, cell_format_border)
                 continue
-            worksheet1.write(i*(len(settings) + len(growth_settings) + 3) + j, 0, f'{setting[0]}')
+            worksheet1.write(i*(len(settings) + len(growth_settings) + 3) + j, 0, f'{setting[0]}', cell_format_border_green_bold_name)
             worksheet1.set_row(i*(len(settings) + len(growth_settings) + 3) + j, None, cell_format_border_green_bold)
         worksheet1.write(i*(len(settings) + len(growth_settings) + 3), 0, 'Название банка:', cell_format_bank)
         worksheet1.write(i*(len(settings) + len(growth_settings) + 3), 1, f'{name}', cell_format_name)
